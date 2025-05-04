@@ -1,0 +1,7 @@
+posts-expand:
+    jq . data/posts.json > data/posts_expand.json
+    mv data/posts_expand.json data/posts.json
+
+posts-compact:
+    jq -c . data/posts.json > data/posts_compact.json
+    mv data/posts_compact.json data/posts.json

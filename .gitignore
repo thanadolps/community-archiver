@@ -1,0 +1,8 @@
+/target
+archive/*
+archive_imgs/*
+data/post_ids.json
+data/posts.json
+data/emote_mapping.json
+emote/*
+scripts/err/*
