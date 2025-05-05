@@ -35,9 +35,14 @@ for post in posts:
 
 print("Found", len(images), "unique images")
 
+unknown = set()
 for img in images:
     code = img.split("/")[-1].split("=")[0] + "="
     if code in mapping:
         name = mapping[code]
     else:
+        unknown.add(code)
         print("Unknown emote:", code)
+
+if len(unknown) > 0:
+    exit(1)

@@ -7,6 +7,9 @@ posts = load(open("data/posts.json"))
 
 attachment = [img for post in posts if post['content_attachment'] is not None for img in post['content_attachment']['images']]
 attachment = [a.split('?')[0] for a in attachment]
+attachment = set(attachment)
+attachment.remove("https://i.ytimg.com/img/no_thumbnail.jpg")
+
 
 # Excluded downloaded images
 downloaded = set(d.stem for d in Path("archive_imgs").iterdir() if d.is_file())

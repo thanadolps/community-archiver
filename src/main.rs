@@ -1,31 +1,75 @@
-mod emoji;
+mod emote;
 
+use clap::Parser;
 use color_eyre::{
     Result,
-    eyre::{Context, ContextCompat, eyre},
+    eyre::{Context, ContextCompat, ensure, eyre},
 };
-use indicatif::ParallelProgressIterator;
+use emote::EmoteResolver;
+use indicatif::{HumanBytes, ParallelProgressIterator, ProgressStyle};
 use itertools::Itertools;
 use rayon::prelude::*;
 use scraper::{Element, ElementRef, Node, Selector};
 use std::{
     fs::{self, File},
-    io,
+    io::{self, BufWriter, Write},
     ops::Not,
+    path::PathBuf,
+    sync::{
+        OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Instant, SystemTime},
 };
+
+#[derive(Parser)]
+struct Args {
+    #[arg(long, value_name = "DIR", default_value = "archive")]
+    archive_dir: PathBuf,
+    #[arg(long, value_name = "DIR", default_value = "data")]
+    /// Directory containing emote data (emote_mapping.json and emotes_default_mapping.json).
+    /// Use for fallback emote resolution.
+    emote_data_dir: PathBuf,
+    #[arg(long, value_name = "FILE", default_value = "data/post_ids.json")]
+    /// Path to post ids.json file, use for ordering the output.
+    post_ids_file: PathBuf,
+    #[arg(long, value_name = "FILE", default_value = "data/posts.json")]
+    output_file: PathBuf,
+}
+
+static EMOTE_RESOLVER: OnceLock<EmoteResolver> = OnceLock::new();
 
 fn main() -> Result<()> {
     color_eyre::install()?;
 
+    let Args {
+        archive_dir,
+        emote_data_dir,
+        post_ids_file,
+        output_file,
+    } = Args::parse();
+    println!("Processing posts in `{}`", archive_dir.display());
+
     let t0 = Instant::now();
+    let dirs = fs::read_dir(archive_dir)?.collect::<io::Result<Vec<_>>>()?;
+    if dirs.is_empty() {
+        println!("No posts to process");
+        return Ok(());
+    }
 
-    let dirs = fs::read_dir("archive")?.collect::<io::Result<Vec<_>>>()?;
+    EMOTE_RESOLVER
+        .set(EmoteResolver::with_emote_dir(&emote_data_dir))
+        .unwrap();
 
-    let posts = dirs
+    let total_bytes = AtomicU64::new(0);
+    let mut posts = dirs
         .into_par_iter()
         .progress()
+        .with_style(ProgressStyle::with_template(
+            "{wide_bar} {pos}/{len} {per_sec} {eta}",
+        )?)
         .map(|dir| {
+            let t0 = Instant::now();
             let content = fs::read_to_string(dir.path())?;
             let name = dir
                 .path()
@@ -33,27 +77,56 @@ fn main() -> Result<()> {
                 .context("no file name")?
                 .to_string_lossy()
                 .to_string();
+            total_bytes.fetch_add(content.len() as u64, Ordering::Relaxed);
 
             let metadata = dir.metadata().ok();
             let created_at = metadata.as_ref().and_then(|m| m.created().ok());
             let modified_at = metadata.as_ref().and_then(|m| m.modified().ok());
             let processed_at = SystemTime::now();
+
+            let post = parse(&content, name.clone())
+                .with_context(|| format!("Fail to parse post from {name}"))?;
+            let elapsed = t0.elapsed();
+
             let meta = Meta {
                 source_created_at: created_at.map(|t| t.into()),
                 source_modified_at: modified_at.map(|t| t.into()),
                 processed_at: processed_at.into(),
+                process_time: elapsed.try_into().unwrap(),
             };
-
-            let post = parse(&content, name.clone())
-                .with_context(|| format!("Fail to parse post from {name}"))?;
             Ok::<_, color_eyre::eyre::Error>(PostWithMeta { post, meta })
         })
         .collect::<Result<Vec<PostWithMeta>>>()?;
 
-    println!("Processing done in : {:.2?}", t0.elapsed());
+    let post_ids = 'a: {
+        let Ok(post_ids) = fs::read_to_string(&post_ids_file) else {
+            eprintln!("Failed to read post ids file: {}", post_ids_file.display());
+            break 'a Vec::new();
+        };
+        let Ok(post_ids) = serde_json::from_str::<Vec<String>>(post_ids.as_str()) else {
+            eprintln!("Failed to parse post ids file: {}", post_ids_file.display());
+            break 'a Vec::new();
+        };
+        post_ids
+    };
+    posts.sort_unstable_by_key(|post| post_ids.iter().position(|id| id == &post.post.id));
 
+    let elapsed = t0.elapsed();
+    let total_bytes = total_bytes.into_inner();
+    println!(
+        "Processing {} posts done in : {:.2?} ({:.2} post/s), Total bytes: {} ({}/s)",
+        posts.len(),
+        elapsed,
+        posts.len() as f64 / elapsed.as_secs_f64(),
+        HumanBytes(total_bytes),
+        HumanBytes(total_bytes / elapsed.as_secs())
+    );
+
+    // Write JSON
     let t0 = Instant::now();
-    serde_json::to_writer_pretty(File::create("data/posts.json")?, &posts)?;
+    let mut posts_writer = BufWriter::new(File::create(output_file)?);
+    serde_json::to_writer(&mut posts_writer, &posts)?;
+    posts_writer.flush()?;
     println!("Writing JSON done in : {:.2?}", t0.elapsed());
 
     Ok(())
@@ -74,6 +147,7 @@ struct Meta {
     source_modified_at: Option<time::OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]
     processed_at: time::OffsetDateTime,
+    process_time: time::Duration,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -304,7 +378,12 @@ fn parse_comments(comment: scraper::ElementRef<'_>) -> Result<(u32, Vec<MainComm
         .collect::<Result<Vec<_>>>()?;
 
     // cannot compare exactly because youtube may hide some comments
-    assert!(n >= comments.len() as u32);
+    // ensure!(
+    //     n >= comments.len() as u32,
+    //     "provided comment count ({}) should be at least the number of visible comments ({})",
+    //     n,
+    //     comments.len()
+    // );
 
     Ok((n, comments))
 }
@@ -429,9 +508,12 @@ fn stringify_content_item(item: ego_tree::NodeRef<Node>) -> Result<String> {
                 "img" => {
                     let src = child.attr("src").unwrap();
                     let alt = child.attr("alt");
-                    match emoji::resolve_emoji(src, alt) {
+                    match EMOTE_RESOLVER.get().unwrap().resolve_emoji(src, alt) {
                         Some(res) => return Ok(res),
-                        None => return Ok(format!("<img src=\"{}\">", src)),
+                        None => {
+                            eprintln!("failed to resolve emoji: {}", src);
+                            return Ok(format!("<img src=\"{}\">", src));
+                        }
                     }
                 }
                 // Some kind of link

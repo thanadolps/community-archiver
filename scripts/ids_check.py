@@ -12,6 +12,10 @@ for fs in Path("archive").iterdir():
     id = fs.stem
     dest.add(id)
 
+extra = dest - source
+missing = source - dest
+print("Extra:", extra)
+print("Missing:", sorted(missing, key=lambda x: source_list.index(x)))
 
-print("Extra:", dest - source)
-print("Missing:", sorted(source - dest, key=lambda x: source_list.index(x)))
+if len(extra) > 0 or len(missing) > 0:
+    exit(1)

@@ -52,3 +52,7 @@ if __name__ == "__main__":
         with open("data/post_ids.json", "r") as f: ids = load(f)
         ivs.sort(key=lambda x: ids.index(x))
         dump(ivs, fs, ensure_ascii=False, indent=4)
+
+    if len(invalids) > 0:
+        exit(1)
+        

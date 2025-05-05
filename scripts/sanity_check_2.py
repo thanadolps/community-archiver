@@ -18,3 +18,7 @@ with open("scripts/err/invalid_ids2.json", "w") as fs:
     with open("data/post_ids.json", "r") as f: o = load(f)
     ids.sort(key=lambda x: o.index(x))
     dump(ids, fs, ensure_ascii=False, indent=4)
+
+if len(ids) > 0:
+    exit(1)
+    

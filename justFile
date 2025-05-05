@@ -5,3 +5,21 @@ posts-expand:
 posts-compact:
     jq -c . data/posts.json > data/posts_compact.json
     mv data/posts_compact.json data/posts.json
+
+clip-download-posts:
+    cat scripts/browser/download_posts.js | xclip -sel clip
+
+check-all:
+    python ./scripts/ids_check.py
+    python ./scripts/sanity_check.py
+    python ./scripts/sanity_check_2.py
+    python ./scripts/sanity_check_3.py
+
+preview-post ID:
+    jq '.[] | select(.id == "{{ID}}")' data/posts.json
+
+preview-posts:
+    jq . data/posts.json
+
+std-run-on DIR:
+    cargo run --release -- --archive-dir "{{DIR}}/archive" --emote-data-dir "{{DIR}}/data" --post-ids-file "{{DIR}}/data/post_ids.json"

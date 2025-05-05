@@ -45,10 +45,6 @@ async function download_post() {
     window.location.pathname.split("/")[2];
   console.log(`Prepare to download post ${id}`);
 
-  // load all the comments
-  await scroll_to_end();
-  await sleep(1000);
-
   // get content view
   const content = document.querySelector("#primary>*>#contents");
 
@@ -61,7 +57,7 @@ async function download_post() {
     await sleep(500);
   }
 
-  // click any poll option to load poll results
+  // Load poll results
   const pollOptions = content.querySelectorAll(
     "#poll-attachment:not([hidden]) a[role='option']"
   );
@@ -69,9 +65,14 @@ async function download_post() {
     const i = Math.floor(Math.random() * pollOptions.length);
     pollOptions[i].scrollIntoView({ behavior: "smooth" });
     await sleep(500);
+    console.log(`Found poll options, clicking ${pollOptions[i].textContent}`);
     pollOptions[i].click();
     await sleep(500);
   }
+
+  // load all the comments
+  await scroll_to_end();
+  await sleep(1000);
 
   // expand all the comments
   const mrs = content.querySelectorAll("#more-replies");

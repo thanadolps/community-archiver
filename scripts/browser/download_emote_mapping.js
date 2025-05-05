@@ -6,7 +6,7 @@ async function emote_mapping(include_custom = true, include_default = false) {
   document.querySelector("#placeholder-area").click();
   await sleep(500);
   document.querySelector("#emoji-button").click();
-  await sleep(500);
+  await sleep(3000);
 
   /** @type {HTMLImageElement[]} */
   const emojis = [];
