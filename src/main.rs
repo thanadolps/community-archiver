@@ -119,7 +119,7 @@ fn main() -> Result<()> {
         elapsed,
         posts.len() as f64 / elapsed.as_secs_f64(),
         HumanBytes(total_bytes),
-        HumanBytes(total_bytes / elapsed.as_secs())
+        HumanBytes((1_000_000_000 * total_bytes as u128 / elapsed.as_nanos()) as u64)
     );
 
     // Write JSON
