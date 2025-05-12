@@ -89,9 +89,9 @@ fn main() -> Result<()> {
             let elapsed = t0.elapsed();
 
             let meta = Meta {
-                source_created_at: created_at.map(|t| t.into()),
-                source_modified_at: modified_at.map(|t| t.into()),
-                processed_at: processed_at.into(),
+                source_created_at: created_at.map(|t| t.try_into().unwrap()),
+                source_modified_at: modified_at.map(|t| t.try_into().unwrap()),
+                processed_at: processed_at.try_into().unwrap(),
                 process_time: elapsed.try_into().unwrap(),
             };
             Ok::<_, color_eyre::eyre::Error>(PostWithMeta { post, meta })
@@ -141,13 +141,10 @@ struct PostWithMeta {
 
 #[derive(Debug, serde::Serialize)]
 struct Meta {
-    #[serde(with = "time::serde::rfc3339::option")]
-    source_created_at: Option<time::OffsetDateTime>,
-    #[serde(with = "time::serde::rfc3339::option")]
-    source_modified_at: Option<time::OffsetDateTime>,
-    #[serde(with = "time::serde::rfc3339")]
-    processed_at: time::OffsetDateTime,
-    process_time: time::Duration,
+    source_created_at: Option<jiff::Timestamp>,
+    source_modified_at: Option<jiff::Timestamp>,
+    processed_at: jiff::Timestamp,
+    process_time: jiff::SignedDuration,
 }
 
 #[derive(Debug, serde::Serialize)]
