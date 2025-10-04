@@ -21,5 +21,19 @@ preview-post ID:
 preview-posts:
     jq . data/posts.json
 
+archive-data:
+    zip -r "Community.zip" archive archive_imgs data emote
+
+clear-data:
+    rm -f emote/*
+    rm -f archive/*
+    rm -f archive_imgs/*
+    rm -f data/emote_mapping.json
+    rm -f data/posts.json
+    rm -f data/post_ids.json
+
+std-run:
+    cargo run --release -- --archive-dir "archive" --emote-data-dir "data" --post-ids-file "data/post_ids.json"
+
 std-run-on DIR:
     cargo run --release -- --archive-dir "{{DIR}}/archive" --emote-data-dir "{{DIR}}/data" --post-ids-file "{{DIR}}/data/post_ids.json"

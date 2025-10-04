@@ -34,7 +34,7 @@ Unfortunately, the process is not as automated as I wish due to Google's blockin
 ### Process posts
 
 8. Run main program (`cargo run --release`), this process the downloaded posts (in `archive` folder) and output the processed posts as `data/posts.json`
-9. Run `download_imgs.py` to download all images in the posts into `archive/imgs` folder
+9. Run `scripts/download_imgs.py` to download all images in the posts into `archive/imgs` folder
 
 ### Extra: Download emojis
 
@@ -42,4 +42,4 @@ Unfortunately, the process is not as automated as I wish due to Google's blockin
 11. Open the developer console, then copy and paste to run the script `scripts/browser/download_emojis.js`
 12. Put the downloaded `emote_mapping.json` into `data` folder
 13. Run the sanity check scripts `scripts/sanity_check_3.py` to check if all emojis has been mapped
-14. Run `script/download_emojis.py` to download all channel's emojis, this will output all emoji images into `emote` folder based on the mapping.
+14. Run `scripts/download_emote.py` to download all channel's emojis, this will output all emoji images into `emote` folder based on the mapping.
