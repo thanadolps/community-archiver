@@ -557,20 +557,8 @@ fn stringify_content_item(item: ego_tree::NodeRef<Node>) -> Result<String> {
             panic!("unexpected element: {:?}", e.html());
         }
 
-        let text = e.text().collect::<String>();
-        let text = text.trim();
-
-        // Likely a styled text
-        if !text.is_empty() {
-            if e.attr("style")
-                .is_some_and(|style| style.contains("font-weight: 500"))
-            {
-                return Ok(format!("<b>{}</b>", text));
-            } else {
-                return Ok(text.to_string());
-            }
-        }
-
+        // Check if span has element children (like <a> or <img>)
+        // If it does, process the children instead of returning the text directly
         if let Some(child) = e.first_element_child() {
             match child.value().name() {
                 // Likly a emoji
@@ -588,15 +576,40 @@ fn stringify_content_item(item: ego_tree::NodeRef<Node>) -> Result<String> {
                 // Some kind of link
                 "a" => {
                     let href = child.attr("href").unwrap();
-                    return Ok(format!(
-                        "<a href=\"{}\">{}</a>",
-                        href,
-                        child.text().collect::<String>()
-                    ));
+                    let text = child.text().collect::<String>();
+                    let has_trailing_nbsp = text.ends_with('\u{a0}');
+                    // Convert non-breaking spaces to regular spaces and trim
+                    let mut text = text.replace('\u{a0}', " ").trim().to_string();
+                    // Preserve trailing space if there was a trailing nbsp
+                    if has_trailing_nbsp {
+                        text.push(' ');
+                    }
+                    return Ok(format!("<a href=\"{}\">{}</a>", href, text));
+                }
+                // Nested span - process all its children and concatenate
+                "span" => {
+                    return e
+                        .children()
+                        .map(stringify_content_item)
+                        .collect::<Result<String>>();
                 }
                 _ => {
                     panic!("unhandled span's child element: {}", child.html());
                 }
+            }
+        }
+
+        // No element children, so this is likely a text span (possibly with styling)
+        let text = e.text().collect::<String>();
+        let text = text.trim();
+
+        if !text.is_empty() {
+            if e.attr("style")
+                .is_some_and(|style| style.contains("font-weight: 500"))
+            {
+                return Ok(format!("<b>{}</b>", text));
+            } else {
+                return Ok(text.to_string());
             }
         }
 
