@@ -2,8 +2,8 @@ mod emote;
 
 use clap::Parser;
 use color_eyre::{
-    Result,
-    eyre::{Context, ContextCompat, ensure, eyre},
+    Result, Section, SectionExt,
+    eyre::{self, Context, ContextCompat, OptionExt, ensure, eyre},
 };
 use emote::EmoteResolver;
 use indicatif::{HumanBytes, ParallelProgressIterator, ProgressStyle};
@@ -85,7 +85,7 @@ fn main() -> Result<()> {
             let processed_at = SystemTime::now();
 
             let post = parse(&content, name.clone())
-                .with_context(|| format!("Fail to parse post from {name}"))?;
+                .with_context(|| format!("fail to parse post from {name}"))?;
             let elapsed = t0.elapsed();
 
             let meta = Meta {
@@ -152,7 +152,7 @@ struct Post {
     id: String,
     #[serde(flatten)]
     main: Main,
-    comments: Option<Vec<MainComment>>,
+    comments: Option<Vec<CommentThread>>,
     total_comment: Option<u32>,
 }
 
@@ -188,18 +188,20 @@ struct PollItem {
     percentage: String,
 }
 
-#[derive(Debug, serde::Serialize)]
-struct MainComment {
+#[derive(Debug, PartialEq, serde::Serialize)]
+struct CommentThread {
     #[serde(flatten)]
     comment: Comment,
-    replies: Vec<Comment>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    replies: Vec<CommentThread>,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, PartialEq, serde::Serialize)]
 struct Comment {
     author: String,
     content: String,
     publish_time: String,
+    url: String,
     sponsor_duration: Option<String>,
     sponsor_badge: Option<String>,
     like: u32,
@@ -357,7 +359,7 @@ fn parse_main(main: scraper::ElementRef<'_>) -> Result<Main> {
     })
 }
 
-fn parse_comments(comment: scraper::ElementRef<'_>) -> Result<(u32, Vec<MainComment>)> {
+fn parse_comments(comment: scraper::ElementRef<'_>) -> Result<(u32, Vec<CommentThread>)> {
     // TODO: used to validate
     let n: u32 = comment
         .select(&Selector::parse("#count").unwrap())
@@ -368,10 +370,14 @@ fn parse_comments(comment: scraper::ElementRef<'_>) -> Result<(u32, Vec<MainComm
         .find_map(|t| parse_numerical_int(t).ok())
         .wrap_err("comments' count should be a number")?;
 
-    let s = Selector::parse("#contents>ytd-comment-thread-renderer").unwrap();
+    let s = Selector::parse("#contents>ytd-comment-thread-renderer:not([is-sub-thread])").unwrap();
     let threads = comment.select(&s);
     let comments = threads
-        .map(parse_comment_thread)
+        .enumerate()
+        .map(|(i, thread)| {
+            parse_comment_thread(thread)
+                .wrap_err_with(|| format!("fail to parse comment thread [{}]", i))
+        })
         .collect::<Result<Vec<_>>>()?;
 
     // cannot compare exactly because youtube may hide some comments
@@ -385,19 +391,75 @@ fn parse_comments(comment: scraper::ElementRef<'_>) -> Result<(u32, Vec<MainComm
     Ok((n, comments))
 }
 
-fn parse_comment_thread(thread: scraper::ElementRef<'_>) -> Result<MainComment> {
-    let comment = thread
-        .select(&Selector::parse("#comment").unwrap())
-        .exactly_one()
-        .unwrap();
-    let comment = parse_comment(comment)?;
+fn parse_comment_thread(thread: scraper::ElementRef<'_>) -> Result<CommentThread> {
+    struct CommentTree<'a> {
+        comment: ElementRef<'a>,
+        children: Vec<CommentTree<'a>>,
+    }
 
-    let replies = thread
-        .select(&Selector::parse("#replies:not([hidden]) #contents>*").unwrap())
-        .map(parse_comment)
-        .collect::<Result<_>>()?;
+    fn build_comment_trees(thread: ElementRef<'_>) -> Result<CommentTree<'_>> {
+        ensure!(thread.value().name() == "ytd-comment-thread-renderer");
 
-    Ok(MainComment { comment, replies })
+        // Find direct comment, not inside replies (relative to current element)
+        let comment = thread
+            .select(&Selector::parse("#comment:not(:scope #replies *)").unwrap())
+            .exactly_one()
+            .unwrap();
+
+        // Find direct children threads, exactly one level inside replies.
+        // Build comment tree from them.
+        let children = thread
+            .select(
+                &Selector::parse(
+                    "#replies:not([hidden]) ytd-comment-thread-renderer:not(:scope #replies #replies *)",
+                )
+                .unwrap(),
+            )
+            .map(|c| build_comment_trees(c))
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(CommentTree { comment, children })
+    }
+
+    let tree = build_comment_trees(thread)?;
+    // .map_err(|mut err| {
+    //     let eyre_err = eyre!("{}", err);
+    //     let Some((e1, e2)) = err.next_tuple() else {
+    //         return eyre_err;
+    //     };
+    //     eyre_err
+    //         .with_section(move || e1.element.html().header("First:"))
+    //         .with_section(move || e2.element.html().header("Second:"))
+    // })?;
+
+    let comment = parse_comment(tree.comment)?;
+
+    // If the tree has only one node then it's either from before youtube thread comment or have no replies.
+    // Parsing with pre thread comment method should handle both case
+    if tree.children.is_empty() {
+        let replies = thread
+            .select(&Selector::parse("#replies:not([hidden]) #contents>*").unwrap())
+            .map(|e| {
+                Ok(CommentThread {
+                    comment: parse_comment(e)?,
+                    replies: Vec::new(),
+                })
+            })
+            .collect::<Result<_>>()?;
+        return Ok(CommentThread { comment, replies });
+    }
+
+    fn build_replies(tree: &CommentTree<'_>) -> Result<CommentThread> {
+        let comment = parse_comment(tree.comment)?;
+        let replies = tree
+            .children
+            .iter()
+            .map(|c| build_replies(c))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(CommentThread { comment, replies })
+    }
+
+    Ok(build_replies(&tree)?)
 }
 
 fn parse_comment(comment: scraper::ElementRef<'_>) -> Result<Comment> {
@@ -422,6 +484,15 @@ fn parse_comment(comment: scraper::ElementRef<'_>) -> Result<Comment> {
         .text()
         .map(|s| s.trim())
         .collect::<String>();
+
+    let url = comment
+        .select(&Selector::parse("#published-time-text a[href]").unwrap())
+        .exactly_one()
+        .map_err(|err| eyre!("{}", err))
+        .wrap_err("comment should has exactly one publish time")?
+        .attr("href")
+        .expect("selector specified href attribute")
+        .to_owned();
 
     let sponsor = comment
         .select(
@@ -471,6 +542,7 @@ fn parse_comment(comment: scraper::ElementRef<'_>) -> Result<Comment> {
     Ok(Comment {
         author,
         publish_time,
+        url,
         sponsor_duration,
         sponsor_badge,
         like,
