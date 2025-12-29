@@ -1,5 +1,5 @@
 // Run this script in the browser console
-// run on community page (ie. `/community`)
+// run on community page (ie. `/community` or `/posts`)
 
 /**
  * @param {string[]} _ids
@@ -59,7 +59,7 @@ async function download_post() {
 
   // Load poll results
   const pollOptions = content.querySelectorAll(
-    "#poll-attachment:not([hidden]) a[role='option']"
+    "#poll-attachment:not([hidden]) a[role='option']",
   );
   if (pollOptions.length > 0) {
     const i = Math.floor(Math.random() * pollOptions.length);
@@ -75,54 +75,73 @@ async function download_post() {
   await sleep(1000);
 
   // expand all the comments
-  const mrs = content.querySelectorAll("#more-replies");
-  console.log(`Found ${mrs.length} more-replies`);
-
-  for (let i = 0; i < mrs.length; i++) {
-    const mr = mrs[i];
-    console.log(`[mr] ${i + 1}/${mrs.length}`);
-    mr.scrollIntoView({ behavior: "smooth" });
-    await sleep(500);
-    mr.click();
-    await sleep(500);
-  }
-  await sleep(1000);
-
-  // expand more replies
   while (true) {
-    // WARN: THAILAND ONLY
-    const bs = content.querySelectorAll(
-      "button[aria-label='แสดงการตอบกลับเพิ่มเติม']"
-    );
-    console.log(`Activating ${bs.length} more replies`);
-    if (bs.length === 0) {
+    let pass = true;
+
+    const mrs = [
+      ...content.querySelectorAll("#more-replies, #more-replies-sub-thread"),
+    ].filter((e) => e.checkVisibility());
+    console.log(`Found ${mrs.length} more-replies`);
+    pass &= mrs.length == 0;
+
+    for (let i = 0; i < mrs.length; i++) {
+      const mr = mrs[i];
+      console.log(`[mr] ${i + 1}/${mrs.length}`);
+      mr.scrollIntoView({ behavior: "smooth" });
+      await sleep(500);
+      mr.click();
+      await sleep(1000);
+      await waitSpinner();
+    }
+    await sleep(1000);
+
+    // expand more replies
+    while (true) {
+      // WARN: THAILAND ONLY
+      const bs = [
+        ...content.querySelectorAll(
+          "button[aria-label='แสดงการตอบกลับเพิ่มเติม']",
+        ),
+      ].filter((e) => e.checkVisibility());
+      console.log(`Activating ${bs.length} more replies`);
+      pass &= bs.length == 0;
+      if (bs.length === 0) {
+        break;
+      }
+
+      for (b of bs) {
+        b.scrollIntoView({ behavior: "smooth" });
+        await sleep(500);
+        b.click();
+        await sleep(1000);
+        await waitSpinner();
+      }
+    }
+
+    // expand "read more"
+    const rms = content.querySelectorAll("#comment #more:not([hidden])");
+    console.log(`Found ${rms.length} "read more" in comments`);
+    pass &= rms.length == 0;
+
+    for (let i = 0; i < rms.length; i++) {
+      const rm = rms[i];
+      console.log(`[rm] ${i + 1}/${rms.length}`);
+      rm.scrollIntoView({ behavior: "smooth" });
+      await sleep(500);
+      rm.click();
+      await sleep(1000);
+      await waitSpinner();
+    }
+
+    // load all images
+    // this may fail, so timeout is required
+    if (!(await loadImgs(content, 10000))) {
+      return false;
+    }
+
+    if (pass) {
       break;
     }
-
-    for (b of bs) {
-      b.scrollIntoView({ behavior: "smooth" });
-      await sleep(500);
-      b.click();
-      await sleep(500);
-    }
-  }
-
-  // expand "read more"
-  const rms = content.querySelectorAll("#comment #more:not([hidden])");
-  console.log(`Found ${rms.length} "read more" in comments`);
-  for (let i = 0; i < rms.length; i++) {
-    const rm = rms[i];
-    console.log(`[rm] ${i + 1}/${rms.length}`);
-    rm.scrollIntoView({ behavior: "smooth" });
-    await sleep(500);
-    rm.click();
-    await sleep(500);
-  }
-
-  // load all images
-  // this may fail, so timeout is required
-  if (!(await loadImgs(content, 10000))) {
-    return false;
   }
 
   // download the html
@@ -193,14 +212,14 @@ function scrollHeight() {
 async function scroll_to_end() {
   while (true) {
     const height = await scroll_step();
-    if (height !== null) {
-      console.log(`Height changed to ${height}`);
-      continue;
+    if (height === null) {
+      console.log("Reached the end of the page");
+      break;
     }
 
-    break;
+    console.log(`Height changed to ${height}`);
+    await waitSpinner();
   }
-  console.log("Reached the end of the page");
 }
 
 async function scroll_step() {
@@ -214,6 +233,19 @@ async function scroll_step() {
     }
   }
   return null;
+}
+
+async function waitSpinner(delay = 1000) {
+  while (activeSpinners().length > 0) {
+    console.log("waiting for spinner loading");
+    await sleep(delay);
+  }
+}
+
+function activeSpinners() {
+  return [
+    ...document.querySelectorAll("#spinner:not([aria-hidden=true])"),
+  ].filter((x) => x.checkVisibility());
 }
 
 function download(obj, name) {
