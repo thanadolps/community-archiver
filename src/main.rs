@@ -537,7 +537,9 @@ fn parse_comment(comment: scraper::ElementRef<'_>) -> Result<Comment> {
     let content = content
         .children()
         .map(stringify_content_item)
-        .collect::<Result<String>>()?;
+        .collect::<Result<String>>()?
+        .trim()
+        .to_owned();
 
     Ok(Comment {
         author,
@@ -557,8 +559,6 @@ fn stringify_content_item(item: ego_tree::NodeRef<Node>) -> Result<String> {
             panic!("unexpected element: {:?}", e.html());
         }
 
-        // Check if span has element children (like <a> or <img>)
-        // If it does, process the children instead of returning the text directly
         if let Some(child) = e.first_element_child() {
             match child.value().name() {
                 // Likly a emoji
@@ -577,16 +577,16 @@ fn stringify_content_item(item: ego_tree::NodeRef<Node>) -> Result<String> {
                 "a" => {
                     let href = child.attr("href").unwrap();
                     let text = child.text().collect::<String>();
-                    let has_trailing_nbsp = text.ends_with('\u{a0}');
-                    // Convert non-breaking spaces to regular spaces and trim
-                    let mut text = text.replace('\u{a0}', " ").trim().to_string();
-                    // Preserve trailing space if there was a trailing nbsp
-                    if has_trailing_nbsp {
-                        text.push(' ');
-                    }
-                    return Ok(format!("<a href=\"{}\">{}</a>", href, text));
+
+                    // push whitespace out
+                    let wi = text.len() - text.trim_start().len();
+                    let wj = text.len() - text.trim_end().len();
+                    let (text, wr) = text.split_at(text.len() - wj);
+                    let (wl, text) = text.split_at(wi);
+
+                    return Ok(format!("{}<a href=\"{}\">{}</a>{}", wl, href, text, wr));
                 }
-                // Nested span - process all its children and concatenate
+                // Nested
                 "span" => {
                     return e
                         .children()
@@ -599,7 +599,7 @@ fn stringify_content_item(item: ego_tree::NodeRef<Node>) -> Result<String> {
             }
         }
 
-        // No element children, so this is likely a text span (possibly with styling)
+        // Likely a styled text
         let text = e.text().collect::<String>();
         let text = text.trim();
 
@@ -644,4 +644,158 @@ fn parse_numerical_int(s: &str) -> Result<u32> {
         return Ok((s.parse::<f64>()? * 100_000.0) as u32);
     }
     Ok(s.parse::<u32>()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod content_item {
+        use super::*;
+        use pretty_assertions::assert_str_eq;
+
+        #[test]
+        fn test_stingify() {
+            let html = r#"<span class="yt-core-attributed-string yt-core-attributed-string--white-space-pre-wrap" dir="auto"><span class="" dir="auto" style="font-weight: 400;">
+<a class="yt-core-attributed-string__link yt-core-attributed-string__link--call-to-action-color" tabindex="0" href="/channel/UCIRjccPaf9aWkNu5cxXJEUg" target="" force-new-state="true">&nbsp;@괜찮아이츠키&nbsp;</a></span>どーせ転生すんだろ笑笑すぐ会えるよー笑笑無意味過ぎる</span>"#;
+            let html = scraper::Html::parse_fragment(html);
+            let content_item = stringify_content_item(
+                *html
+                    .root_element()
+                    .first_element_child()
+                    .expect("top element is <html> and its first child is our input fragment"),
+            )
+            .unwrap();
+            assert_str_eq!(
+                content_item.trim(),
+                "<a href=\"/channel/UCIRjccPaf9aWkNu5cxXJEUg\">@괜찮아이츠키</a> どーせ転生すんだろ笑笑すぐ会えるよー笑笑無意味過ぎる"
+            );
+        }
+    }
+
+    mod comment_thread {
+        use insta::assert_json_snapshot;
+        use std::collections::HashMap;
+
+        use super::*;
+
+        fn parse_thread_from_fixture(fixture_name: &str) -> Result<CommentThread> {
+            // Initialize emote resolver with empty mapping for tests
+            EMOTE_RESOLVER
+                .set(EmoteResolver::with_mapping(HashMap::default()))
+                .ok();
+
+            // Load HTML fixture
+            let fixture_path = format!(
+                "{}/tests/fixtures/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                fixture_name
+            );
+            let html = std::fs::read_to_string(&fixture_path).expect("fixture file should exist");
+
+            // Parse HTML and extract comment thread
+            let html = scraper::Html::parse_fragment(&html);
+            parse_comment_thread(
+                html.root_element()
+                    .first_element_child()
+                    .expect("top element is <html> and its first child is our input fragment"),
+            )
+        }
+
+        #[test]
+        fn test_threaded_replied() {
+            let thread = parse_thread_from_fixture("threaded_replied.html").unwrap();
+
+            assert_json_snapshot!(thread, @r#"
+            {
+              "author": "@龍-x6w7c",
+              "content": "今日は本当にいいライブだったよ!!6年間本当にありがとう😊",
+              "publish_time": "20 ชั่วโมงที่ผ่านมา",
+              "url": "/post/UgkxK7l4q43MGEyzwAhZnvutiv2x57ZmyRXR?lc=UgylRbHxm0aafAMaD514AaABAg",
+              "sponsor_duration": null,
+              "sponsor_badge": null,
+              "like": 300,
+              "replies": [
+                {
+                  "author": "@Wolfs97",
+                  "content": "悲しい",
+                  "publish_time": "16 ชั่วโมงที่ผ่านมา",
+                  "url": "/post/UgkxK7l4q43MGEyzwAhZnvutiv2x57ZmyRXR?lc=UgylRbHxm0aafAMaD514AaABAg.AREhkBaexO8ARF8_UOHFLV",
+                  "sponsor_duration": null,
+                  "sponsor_badge": null,
+                  "like": 7
+                },
+                {
+                  "author": "@LolXD-rl7gg",
+                  "content": "Amaneeee😭😭😭😭💙💙💙💙thank you for past 6 years so😭😭💙💙💙",
+                  "publish_time": "18 ชั่วโมงที่ผ่านมา",
+                  "url": "/post/UgkxK7l4q43MGEyzwAhZnvutiv2x57ZmyRXR?lc=UgylRbHxm0aafAMaD514AaABAg.AREhkBaexO8AREwUJ0hDAD",
+                  "sponsor_duration": null,
+                  "sponsor_badge": null,
+                  "like": 5
+                },
+                {
+                  "author": "@괜찮아이츠키",
+                  "content": "今まで本当にありがとう😢ゆっくり休んでね。また何処かで会えたらな。",
+                  "publish_time": "9 ชั่วโมงที่ผ่านมา",
+                  "url": "/post/UgkxK7l4q43MGEyzwAhZnvutiv2x57ZmyRXR?lc=UgylRbHxm0aafAMaD514AaABAg.AREhkBaexO8ARFsyJznk92",
+                  "sponsor_duration": "สมาชิกใหม่",
+                  "sponsor_badge": "https://yt3.ggpht.com/l3iBRUbum0N6BsR7SJNKvR4ZlVox7gVDDGKClQQ4fBHBm-tuxM7nkhJacX49DkIfo55YYUyL9C0=s32-k-nd",
+                  "like": 5,
+                  "replies": [
+                    {
+                      "author": "@いをと",
+                      "content": "<a href=\"/channel/UCIRjccPaf9aWkNu5cxXJEUg\">@괜찮아이츠키</a> どーせ転生すんだろ笑笑すぐ会えるよー笑笑無意味過ぎる",
+                      "publish_time": "8 นาทีที่ผ่านมา",
+                      "url": "/post/UgkxK7l4q43MGEyzwAhZnvutiv2x57ZmyRXR?lc=UgylRbHxm0aafAMaD514AaABAg.AREhkBaexO8ARGsW6iq7S5",
+                      "sponsor_duration": null,
+                      "sponsor_badge": null,
+                      "like": 0
+                    }
+                  ]
+                }
+              ]
+            }
+            "#);
+        }
+
+        #[test]
+        fn test_pre_thread_replied() -> Result<()> {
+            let thread = parse_thread_from_fixture("pre_thread_replied.html")?;
+
+            assert_json_snapshot!(thread, @r#"
+            {
+              "author": "@Redacted",
+              "content": "Eh? Both links are in Japanese.",
+              "publish_time": "1 ปีที่แล้ว",
+              "url": "/channel/UCD8HOxPs4Xvsm8H0ZxXGiBw/community?lc=UgwDTW4THFsDyEAMYXN4AaABAg&lb=Ugkx2lhAQ1LhH8eGLjoiCuxtsbCKhFChlt8A",
+              "sponsor_duration": null,
+              "sponsor_badge": null,
+              "like": 4,
+              "replies": [
+                {
+                  "author": "@Redacted",
+                  "content": "One says it's the Japan dubbed version and the other is the original English voices",
+                  "publish_time": "1 ปีที่แล้ว",
+                  "url": "/channel/UCD8HOxPs4Xvsm8H0ZxXGiBw/community?lc=UgwDTW4THFsDyEAMYXN4AaABAg.9iMHEysqBs59iMOR-vpM9U&lb=Ugkx2lhAQ1LhH8eGLjoiCuxtsbCKhFChlt8A",
+                  "sponsor_duration": null,
+                  "sponsor_badge": null,
+                  "like": 2
+                },
+                {
+                  "author": "@Redacted",
+                  "content": "2nd link has English audio",
+                  "publish_time": "1 ปีที่แล้ว",
+                  "url": "/channel/UCD8HOxPs4Xvsm8H0ZxXGiBw/community?lc=UgwDTW4THFsDyEAMYXN4AaABAg.9iMHEysqBs59iMjoxWYh6a&lb=Ugkx2lhAQ1LhH8eGLjoiCuxtsbCKhFChlt8A",
+                  "sponsor_duration": null,
+                  "sponsor_badge": null,
+                  "like": 3
+                }
+              ]
+            }
+            "#);
+
+            Ok(())
+        }
+    }
 }
