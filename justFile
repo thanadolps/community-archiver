@@ -10,10 +10,10 @@ clip-download-posts:
     cat scripts/browser/download_posts.js | xclip -sel clip
 
 check-all:
-    python ./scripts/ids_check.py
-    python ./scripts/sanity_check.py
-    python ./scripts/sanity_check_2.py
-    python ./scripts/sanity_check_3.py
+    uv run ./scripts/ids_check.py
+    cargo run --bin sanity_check --release
+    uv run ./scripts/sanity_check_2.py
+    uv run ./scripts/sanity_check_3.py
 
 preview-post ID:
     jq '.[] | select(.id == "{{ID}}")' data/posts.json

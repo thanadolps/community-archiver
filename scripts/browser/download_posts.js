@@ -40,10 +40,27 @@ async function posts(_ids) {
 }
 
 async function download_post() {
+  const result = await extract_post();
+  if (!result) {
+    return false;
+  }
+
+  const { id, html } = result;
+  console.log(`Download post ${id}`);
+  download(html, `${id}.html`);
+
+  return true;
+}
+
+/**
+ * Extract post content without downloading.
+ * Returns {id, html} object or false on failure.
+ */
+async function extract_post() {
   const id =
     new URLSearchParams(window.location.search).get("lb") ??
     window.location.pathname.split("/")[2];
-  console.log(`Prepare to download post ${id}`);
+  console.log(`Prepare to extract post ${id}`);
 
   // get content view
   const content = document.querySelector("#primary>*>#contents");
@@ -129,7 +146,7 @@ async function download_post() {
       rm.scrollIntoView({ behavior: "smooth" });
       await sleep(500);
       rm.click();
-      await sleep(1000);
+      await sleep(250);
       await waitSpinner();
     }
 
@@ -144,12 +161,11 @@ async function download_post() {
     }
   }
 
-  // download the html
-  console.log(`Download post ${id}`);
+  // extract the html
+  console.log(`Extracted post ${id}`);
   const html = content.outerHTML;
-  download(html, `${id}.html`);
 
-  return true;
+  return { id, html };
 }
 
 /**

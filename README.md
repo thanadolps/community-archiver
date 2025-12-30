@@ -22,24 +22,27 @@ Unfortunately, the process is not as automated as I wish due to Google's blockin
 
 ### Download posts html
 
+> There are now an automated scripts for step 5 and 6 at `scripts/automate/download_posts.py`
+
 5. Navigate back to channel's community tab, then copy and paste to run the script `scripts/browser/download_posts.js`,
    then run functiion `posts` with post ids (from `data/post_ids.json`) as argument, this will slowly download all the posts.
 6. Put the downloaded posts into `archive` folder
 7. Run the sanity check scripts
 
    - `scripts/ids_check.py` to check if all post ids has been downloaded
-   - `scripts/sanity_check.py` and `scripts/sanity_check_2.py` to do basic validation on the downloaded posts
-     (If there are any errors, you should identify the broken/missing posts and re-download asap)
+   - Run basic validation on the downloaded posts, if there are any errors, you should identify the broken/missing posts and re-download ASAP
+     - `src/bin/sanity_check.rs` (`cargo run --bin sanity_check --release`)
 
 ### Process posts
 
 8. Run main program (`cargo run --release`), this process the downloaded posts (in `archive` folder) and output the processed posts as `data/posts.json`
-9. Run `scripts/download_imgs.py` to download all images in the posts into `archive/imgs` folder
+9. Run sanity check script `scripts/sanity_check_2.py`
+10. Run `scripts/download_imgs.py` to download all images in the posts into `archive/imgs` folder
 
 ### Extra: Download emojis
 
-10. Navigate to any post (ie. `/community?lb=XXXXX`, not channel's community tab)
-11. Open the developer console, then copy and paste to run the script `scripts/browser/download_emojis.js`
-12. Put the downloaded `emote_mapping.json` into `data` folder
-13. Run the sanity check scripts `scripts/sanity_check_3.py` to check if all emojis has been mapped
-14. Run `scripts/download_emote.py` to download all channel's emojis, this will output all emoji images into `emote` folder based on the mapping.
+11. Navigate to any post (ie. `/community?lb=XXXXX`, not channel's community tab)
+12. Open the developer console, then copy and paste to run the script `scripts/browser/download_emote_mapping.js`
+13. Put the downloaded `emote_mapping.json` into `data` folder
+14. Run the sanity check scripts `scripts/sanity_check_3.py` to check if all emojis has been mapped
+15. Run `scripts/download_emote.py` to download all channel's emojis, this will output all emoji images into `emote` folder based on the mapping.

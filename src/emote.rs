@@ -28,7 +28,7 @@ impl EmoteResolver {
             // backup
             let code = src
                 .split('/')
-                .last()
+                .next_back()
                 .unwrap()
                 .split('.')
                 .next()

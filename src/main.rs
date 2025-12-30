@@ -3,7 +3,7 @@ mod emote;
 use clap::Parser;
 use color_eyre::{
     Result, Section, SectionExt,
-    eyre::{self, Context, ContextCompat, OptionExt, ensure, eyre},
+    eyre::{Context, ContextCompat, ensure, eyre},
 };
 use emote::EmoteResolver;
 use indicatif::{HumanBytes, ParallelProgressIterator, ProgressStyle};
@@ -85,7 +85,7 @@ fn main() -> Result<()> {
             let processed_at = SystemTime::now();
 
             let post = parse(&content, name.clone())
-                .with_context(|| format!("fail to parse post from {name}"))?;
+                .wrap_err_with(|| format!("fail to parse post from {name}"))?;
             let elapsed = t0.elapsed();
 
             let meta = Meta {
@@ -377,6 +377,13 @@ fn parse_comments(comment: scraper::ElementRef<'_>) -> Result<(u32, Vec<CommentT
         .map(|(i, thread)| {
             parse_comment_thread(thread)
                 .wrap_err_with(|| format!("fail to parse comment thread [{}]", i))
+                .with_section(|| {
+                    thread
+                        .text()
+                        .map(|s| s.trim())
+                        .collect::<String>()
+                        .header("Comment thread's text")
+                })
         })
         .collect::<Result<Vec<_>>>()?;
 
@@ -422,15 +429,6 @@ fn parse_comment_thread(thread: scraper::ElementRef<'_>) -> Result<CommentThread
     }
 
     let tree = build_comment_trees(thread)?;
-    // .map_err(|mut err| {
-    //     let eyre_err = eyre!("{}", err);
-    //     let Some((e1, e2)) = err.next_tuple() else {
-    //         return eyre_err;
-    //     };
-    //     eyre_err
-    //         .with_section(move || e1.element.html().header("First:"))
-    //         .with_section(move || e2.element.html().header("Second:"))
-    // })?;
 
     let comment = parse_comment(tree.comment)?;
 
@@ -454,12 +452,15 @@ fn parse_comment_thread(thread: scraper::ElementRef<'_>) -> Result<CommentThread
         let replies = tree
             .children
             .iter()
-            .map(|c| build_replies(c))
+            .enumerate()
+            .map(|(i, c)| {
+                build_replies(c).wrap_err_with(|| format!("failed to build reply [{}]", i))
+            })
             .collect::<Result<Vec<_>>>()?;
         Ok(CommentThread { comment, replies })
     }
 
-    Ok(build_replies(&tree)?)
+    build_replies(&tree)
 }
 
 fn parse_comment(comment: scraper::ElementRef<'_>) -> Result<Comment> {
@@ -563,7 +564,9 @@ fn stringify_content_item(item: ego_tree::NodeRef<Node>) -> Result<String> {
             match child.value().name() {
                 // Likly a emoji
                 "img" => {
-                    let src = child.attr("src").unwrap();
+                    let src = child
+                        .attr("src")
+                        .ok_or(eyre!("img should have src: {}", child.html()))?;
                     let alt = child.attr("alt");
                     match EMOTE_RESOLVER.get().unwrap().resolve_emoji(src, alt) {
                         Some(res) => return Ok(res),

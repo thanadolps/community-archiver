@@ -1,0 +1,8 @@
+[project]
+name = "automate"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "browser-cookie3>=0.20.1",
+    "selenium>=4.39.0",
+]
